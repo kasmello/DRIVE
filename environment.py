@@ -3,23 +3,24 @@ import pygame
 import numpy as np
 import math
 import random
+import time
 from gym import Env
 from collections import OrderedDict
 from gym.spaces import Discrete, Box, Dict
 
 class CarParking(Env):
   
-  def __init__(self):
+  def __init__(self, fps):
     # 1=right, 2=left, 3=stay
     # 1=accelerate, 2=deccelerate, 3=same speed and direction
 
     self.screen = None #pygame.display.set_mode((area_length, area_width))
     self.clock = None #pygame.time.Clock()
-    self.max_iterations = 1000
     self.car_width = 150
     self.car_length = 400
-    self.fps = 60
-    self.car_hypotenuse = math.sqrt((self.car_length/2)**2 + (self.car_width/2)**2)
+    self.fps = fps
+    self.timestep = 1
+    self.car_hypotenuse = np.linalg.norm([self.car_length/2, self.car_width/2])
     self.hypotenuse_angle = math.acos(self.car_width/(2*self.car_hypotenuse))
     self.car_wheelbase=250
     self.parking_width = 240
@@ -27,25 +28,26 @@ class CarParking(Env):
     self.road_width = 300
     self.area_width = (2 * self.road_width) + (2 * self.parking_length) #1300
     self.area_length = 8 * self.parking_width #1920
-    self.timestep=1
+    self.parking_hypotenuse = np.linalg.norm([self.area_width,self.area_length])
+
     self.max_steering=30
     self.max_velocity=30 #in m/s
     self.speed_limit=10
     self.max_acceleration=3.4 #around 12kmh/s
-    self.max_decceleration=6
     self.natural_decceleration=1
     self.car_image = pygame.image.load('car_sprite.png')
     self.car_image = pygame.transform.scale(self.car_image, (self.car_width, self.car_length))
     self.action_space=Box(low=np.array([1,1]),high=np.array([3,3]),dtype=int)
+    # 'velocity','acceleration','angle','pos','steering','wheels_inside','distances','angle_from_parking'
     self.observation_space=Dict({
-        'velocity': Box(low=np.array([0]),high=np.array([150]))
-        ,'acceleration': Box(low=np.array([0]),high=np.array([150]))
+        'velocity': Box(low=np.array([-self.max_velocity]),high=np.array([self.max_velocity]))
+        ,'acceleration': Box(low=np.array([-self.max_acceleration]),high=np.array([self.max_acceleration]))
         ,'angle': Box(low=np.array([0]),high=np.array([359])) #angle of car
         ,'pos': Box(low=np.array([0, 0]), high=np.array([self.area_length-1, self.area_width-1])) #calculate 4 corners of car using trigonometry
         ,'steering': Discrete(61,start=-30)#angle of steering wheel
         ,'wheels_inside': Discrete(5,start=0)
-        ,'distances': Box(low=np.array([0,0,0,0]),high=np.array([self.area_width]))
-        ,'y_dist': Box(low=np.array([0]),high=np.array([self.area_length]))
+        ,'distances': Box(low=np.array([0,0,0,0]),high=np.array([self.parking_hypotenuse, self.parking_hypotenuse, self.parking_hypotenuse, self.parking_hypotenuse]))
+        ,'angle_from_parking': Box(low=np.array([0]),high=np.array([359]))
         })
     self.set_vars()
 
@@ -75,7 +77,7 @@ class CarParking(Env):
       self.clock=None
 
   def process_new_position(self, reward):
-      self.state['velocity'] += self.state['acceleration']
+      self.state['velocity'] += self.state['acceleration'] /4
       if abs(self.state['velocity']) > self.speed_limit:
         reward -= 1
       self.state['velocity'] = max(-self.max_velocity, min(self.state['velocity'], self.max_velocity))
@@ -85,11 +87,11 @@ class CarParking(Env):
         angular_velocity = self.state['velocity'] / turning_radius
       else:
         angular_velocity = 0
-
-      self.state['pos'] += np.array([self.state['velocity'] * math.sin(math.radians(self.state['angle']))*self.timestep,-self.state['velocity'] * math.cos(math.radians(self.state['angle']))*self.timestep])
-      self.state['angle'] = (self.state['angle'] + math.degrees(angular_velocity) * self.timestep)%360
+      self.state['angle'] = (self.state['angle'] + math.degrees(angular_velocity)*self.timestep/2)%360
       if self.state['angle'] < 0:
         self.state['angle']+= 360
+      self.state['pos'] += np.array([self.state['velocity'] * math.sin(math.radians(self.state['angle']))*self.timestep/2,-self.state['velocity'] * math.cos(math.radians(self.state['angle']))*self.timestep/2])
+      
       
 
   def calculate_four_corners(self):
@@ -111,59 +113,55 @@ class CarParking(Env):
     if not self.clock:
       self.clock = pygame.time.Clock()
     reward = 0
-    accelerate = True
+    opposite = False
+    terminated = False
     # timestep = self.clock.get_time() / 1000
-    self.current_iterations += 1
     action = np.array([int((action-1)/3)+1,((action-1)%3)+1]) 
+
     if action[0]==1:
-      
-      self.state['steering']+=self.max_steering*self.timestep
+      self.state['steering']+=self.max_steering*(self.timestep/6) 
     elif action[0]==2:
-      self.state['steering']-=self.max_steering*self.timestep
+      self.state['steering']-=self.max_steering*(self.timestep/6)
     else:
-      pass
+      if self.state['steering'] < 0:
+        self.state['steering'] +=self.max_steering*(self.timestep/6)
+        self.state['steering'] = min(self.state['steering'],0)
+      elif self.state['steering'] > 0:
+        self.state['steering'] -= self.max_steering*(self.timestep/6)
+        self.state['steering'] = max(self.state['steering'],0)
+
 
     if self.state['steering'] != max(-self.max_steering, min(self.state['steering'], self.max_steering)):
       reward -= 1
       self.state['steering'] = max(-self.max_steering, min(self.state['steering'], self.max_steering))
 
     if action[1]==1:
-      if self.state['velocity']>=0:
-        
-        self.state['acceleration'] += random.uniform(self.max_acceleration-0.05,self.max_acceleration+0.05) * self.timestep * 0.005
-      else:
-        accelerate=False
-        if self.state['acceleration'] < 0:
-          self.state['acceleration'] = 0
-        self.state['acceleration'] += random.uniform(self.max_decceleration-0.1,self.max_decceleration+0.1) * self.timestep * 0.005
-        if abs(self.state['velocity']) < abs(self.state['acceleration']):
-          self.state['acceleration'] = -self.state['velocity']
-    elif action[1]==2:
-      if self.state['velocity']<=0:
-        self.state['acceleration'] -= random.uniform(self.max_acceleration-0.05,self.max_acceleration+0.05) * self.timestep * 0.005
-      else:
-        accelerate=False
-        if self.state['acceleration'] > 0:
-          self.state['acceleration'] = 0
-        self.state['acceleration'] -= random.uniform(self.max_decceleration-0.1,self.max_decceleration+0.1) * self.timestep * 0.005
-        if abs(self.state['velocity']) < abs(self.state['acceleration']):
-          self.state['acceleration'] = -self.state['velocity']
-    else: #action[1]==3:
-      self.state['acceleration']=0
-      # accelerate=False
-      # if abs(self.state['velocity']) > timestep * natural_decceleration:
-      #     self.state['acceleration']= -math.copysign(natural_decceleration, self.state['acceleration'])
-      # else:
-      #     self.state['acceleration'] = -self.state['velocity']
+      if self.state['acceleration']<0:
+        opposite=True
+        self.state['acceleration'] = 0
 
-    if accelerate:
+      self.state['acceleration'] += self.max_acceleration * (self.timestep/6) #15 second to reach full acceleration from 0
+
+    elif action[1]==2:
+      if self.state['acceleration']>0:
+        opposite=True
+        self.state['acceleration'] =0
+ 
+      self.state['acceleration'] -= self.max_acceleration * (self.timestep/6)  #15 seconds to reach full acceleration from 0
+
+    else: #action[1]==3:
+      if self.state['velocity']<0:
+        self.state['acceleration'] = min(self.max_acceleration * (self.timestep/6),-self.state['velocity'])
+
+      elif self.state['velocity']>0:
+        self.state['acceleration'] = max(-self.max_acceleration * (self.timestep/6),-self.state['velocity'])
+
+
+
+    if not opposite:
       if self.state['acceleration'] != max(-self.max_acceleration, min(self.state['acceleration'], self.max_acceleration)):
         reward-=1 #unecessary action
       self.state['acceleration'] = max(-self.max_acceleration, min(self.state['acceleration'], self.max_acceleration))
-    else:
-      if self.state['acceleration'] != max(-self.max_decceleration, min(self.state['acceleration'], self.max_decceleration)):
-        reward -= 1
-      self.state['acceleration'] != max(-self.max_decceleration, min(self.state['acceleration'], self.max_decceleration))
 
     self.process_new_position(reward)
     self.wheels['rf'], self.wheels['lf'], self.wheels['rb'], self.wheels['lb'] = self.calculate_four_corners()
@@ -174,8 +172,8 @@ class CarParking(Env):
     reward += 500/self.distance_to_parking(self.state['pos'], np.array(self.goal_center))
 
     # check if done
-    done, reward_gain = self.check_if_inside()
-    if done and reward_gain < -1000:
+    terminated, reward_gain = self.check_if_inside()
+    if terminated and reward_gain < -1000:
       reward = reward_gain
     else:
       reward += reward_gain
@@ -183,12 +181,9 @@ class CarParking(Env):
 
     
     info = {}
-    coords = None
     self.clock.tick(self.fps)
-    if self.current_iterations == self.max_iterations:
-      done = True
 
-    return self.state, reward, done, info, coords
+    return self.state, reward, terminated, info
   
   def render(self):
     if not self.screen:
@@ -208,6 +203,15 @@ class CarParking(Env):
       rectangle_bottom = pygame.Rect(self.parking_width*(i+1)-1, self.parking_length + 2 * self.road_width-1, 3, self.parking_length)
       pygame.draw.rect(self.screen, (0,0,0), rectangle_top)
       pygame.draw.rect(self.screen, (0,0,0), rectangle_bottom)
+
+
+    font = pygame.font.Font(None, 36)
+    vel_text = font.render(str(self.state['velocity']), True, (255, 0, 0)) 
+    acc_text = font.render(str(self.state['acceleration']), True, (255, 0, 0)) 
+    steer_text = font.render(str(self.state['steering']), True, (255, 0, 0)) 
+    self.screen.blit(vel_text, (1000, 10))
+    self.screen.blit(acc_text, (1000, 100))
+    self.screen.blit(steer_text, (1000, 200))
 
     
     rotated = pygame.transform.rotate(self.car_image, -self.state['angle'])
@@ -233,7 +237,6 @@ class CarParking(Env):
     self.goal_number = random.randint(0,15)
     self.wheels = {}
     self.wheels['rf'], self.wheels['lf'], self.wheels['rb'], self.wheels['lb'] = self.calculate_four_corners()
-    self.current_iterations = 0
     if self.goal_number < 8:
       self.goal = np.array([[(self.goal_number*self.parking_width),0], #top left
                             [((self.goal_number+1)*self.parking_width)-1,0], #top right
@@ -295,4 +298,61 @@ class CarParking(Env):
         
     return np.array(llist)
   
-env = CarParking()
+
+
+if __name__ == '__main__':
+  fps = 60
+  env = CarParking(fps)
+  state = env.reset()
+  score = 0
+  start = time.time()
+  # for i in range(10000):
+  #     action = env.action_space.sample()
+  #     action = np.array([3,1])
+  #     if i <1000:
+  #         action = np.array([3,1])
+  #     state, reward, done, info, coords = env.step(env.convert_actions(action))
+  #     env.render()
+  #     score += reward
+  #     if done:
+  #         env.close()
+  #         print('CAR CRASH')
+  #         break
+  env.render()
+  done = False
+  i = 0
+  while not done:
+    i += 1
+    for event in pygame.event.get():
+      if event.type == pygame.QUIT:
+        done = True
+        break
+
+    driving = 3
+    steering = 3
+    keys = pygame.key.get_pressed()
+    if keys[pygame.K_w]:
+      driving = 1
+    elif keys[pygame.K_s]:
+      driving = 2
+
+
+    if keys[pygame.K_a]:
+      steering = 2
+    elif keys[pygame.K_d]:
+      steering = 1
+
+    action = np.array([steering,driving])
+    state, reward, done, info = env.step(env.convert_actions(action))
+    env.render()
+    score += reward
+    if done:
+      env.close()
+      break
+    # time.sleep(1/fps)
+    if i == 2000000:
+      done = True
+
+  end = time.time()
+  print(end-start)
+
