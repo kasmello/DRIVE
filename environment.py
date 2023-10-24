@@ -55,8 +55,6 @@ class CarParking(Env):
     goal = True
     wheels_inside = 0
     reward = 0
-    if self.state['velocity'] != 0:
-      goal = False
     for wheel in ['lb','rb','lf','rf']:
       if self.wheels[wheel][0] < 0 or self.wheels[wheel][0] >= self.area_length or self.wheels[wheel][1] < 0 or self.wheels[wheel][1] >= self.area_width:
         return True,-10000
@@ -65,17 +63,20 @@ class CarParking(Env):
           goal = False
         else:
           wheels_inside += 1
-          reward += 100
+          reward += 5
       else:
         if self.wheels[wheel][0] < self.goal[0][0] or self.wheels[wheel][0] > self.goal[1][0] or self.wheels[wheel][1] > self.goal[0][1] or self.wheels[wheel][1] < self.goal[2][1]:
           goal = False
         else:
           wheels_inside += 1
-          reward += 100
-      
+          reward += 5
+
+    if self.state['velocity'] != 0:
+      goal = False
+
     self.state['wheels_inside'] = wheels_inside
     if goal:
-      return True, 5000
+      return True, 10000
     return False, reward
 
   def close(self):
@@ -86,7 +87,7 @@ class CarParking(Env):
       self.clock=None
 
   def process_new_position(self, reward):
-      self.state['velocity'] += self.state['acceleration'] /4
+      self.state['velocity'] += self.state['acceleration'] /10
       if abs(self.state['velocity']) > self.speed_limit:
         reward -= 1
       self.state['velocity'] = max(-self.max_velocity, min(self.state['velocity'], self.max_velocity))
@@ -98,10 +99,11 @@ class CarParking(Env):
         angular_velocity = self.state['velocity'] / turning_radius
       else:
         angular_velocity = 0
-      self.state['angle'] = (self.state['angle'] + math.degrees(angular_velocity)*self.timestep/2)%360
+      self.state['angle'] = (self.state['angle'] + math.degrees(angular_velocity)*self.timestep)%360
       if self.state['angle'] < 0:
         self.state['angle']+= 360
-      self.state['pos'] += np.array([self.state['velocity'] * math.sin(math.radians(self.state['angle']))*self.timestep/2,-self.state['velocity'] * math.cos(math.radians(self.state['angle']))*self.timestep/2])
+      self.state['pos'] += np.array([self.state['velocity'] * math.sin(math.radians(self.state['angle']))*self.timestep,-self.state['velocity'] * math.cos(math.radians(self.state['angle']))*self.timestep])
+      return reward
       
       
 
@@ -117,8 +119,6 @@ class CarParking(Env):
 
     return rf, lf, rb, lb
   
-  def distance_to_parking(self, car_pos, park_pos):
-    return np.linalg.norm([car_pos[0]-park_pos[0], car_pos[1]-park_pos[1]])
 
   def step(self, action):
     if not self.clock:
@@ -143,46 +143,48 @@ class CarParking(Env):
 
 
     if self.state['steering'] != max(-self.max_steering, min(self.state['steering'], self.max_steering)):
-      reward -= 1
       self.state['steering'] = max(-self.max_steering, min(self.state['steering'], self.max_steering))
 
     if action[1]==1:
       if self.state['acceleration']<0:
-        opposite=True
         self.state['acceleration'] = 0
 
-      self.state['acceleration'] += self.max_acceleration * (self.timestep/6) #15 second to reach full acceleration from 0
+      if self.state['velocity']<0:
+        opposite=True
+        self.state['acceleration'] += self.max_acceleration * (self.timestep/3)
+
+      self.state['acceleration'] += self.max_acceleration * (self.timestep/60) #15 second to reach full acceleration from 0
 
     elif action[1]==2:
       if self.state['acceleration']>0:
-        opposite=True
         self.state['acceleration'] =0
+
+      if self.state['velocity']>0:
+        opposite=True
+        self.state['acceleration'] -= self.max_acceleration * (self.timestep/3)
  
-      self.state['acceleration'] -= self.max_acceleration * (self.timestep/6)  #15 seconds to reach full acceleration from 0
+      self.state['acceleration'] -= self.max_acceleration * (self.timestep/60)  #15 seconds to reach full acceleration from 0
 
     else: #action[1]==3:
       if self.state['velocity']<0:
-        self.state['acceleration'] = min(self.max_acceleration * (self.timestep/6),-self.state['velocity'])
+        self.state['acceleration'] = min(self.max_acceleration * (self.timestep/10),-self.state['velocity'])
 
       elif self.state['velocity']>0:
-        self.state['acceleration'] = max(-self.max_acceleration * (self.timestep/6),-self.state['velocity'])
+        self.state['acceleration'] = max(-self.max_acceleration * (self.timestep/10),-self.state['velocity'])
       else:
         self.state['acceleration']=0
     
-
-
-
     if not opposite:
-      if self.state['acceleration'] != max(-self.max_acceleration, min(self.state['acceleration'], self.max_acceleration)):
-        reward-=1 #unecessary action
       self.state['acceleration'] = max(-self.max_acceleration, min(self.state['acceleration'], self.max_acceleration))
-    self.process_new_position(reward)
+    reward = self.process_new_position(reward)
     self.wheels['rf'], self.wheels['lf'], self.wheels['rb'], self.wheels['lb'] = self.calculate_four_corners()
     self.state['distances'] = self.calculate_distances()
     # calculate reward
-    reward -= 1
-    if self.distance_to_parking(self.state['pos'], np.array(self.goal_center)) < 450:
-      reward += 450/(self.distance_to_parking(self.state['pos'], np.array(self.goal_center))+abs(self.state['velocity']))
+    reward -= 2
+    euc_dis = np.linalg.norm(self.state['distances'])
+    if euc_dis < 500:
+      reward += 500/(euc_dis+20*abs(self.state['velocity']))
+
 
     # check if done
     terminated, reward_gain = self.check_if_inside()
@@ -201,7 +203,10 @@ class CarParking(Env):
     if not self.screen:
       pygame.init()
       pygame.display.init()
-      self.screen = pygame.display.set_mode((self.area_length, self.area_width), pygame.FULLSCREEN | pygame.SCALED)
+      if __name__=='__main__':
+        self.screen = pygame.display.set_mode((self.area_length, self.area_width), pygame.FULLSCREEN | pygame.SCALED)
+      else:
+        self.screen = pygame.display.set_mode((self.area_length, self.area_width), pygame.HIDDEN)
       
     self.screen.fill((255, 255, 255))
     if self.goal_number < 8:
@@ -243,6 +248,7 @@ class CarParking(Env):
     for part in ['rf','lf','rb','lb']:
       pygame.draw.circle(self.screen, (255,0,0), self.wheels[part], 5)
     pygame.display.update()
+    return self.screen
 
   def set_vars(self):
     x_noise = random.uniform(-(self.road_width-self.car_width)/2,(self.road_width-self.car_width)/2)
