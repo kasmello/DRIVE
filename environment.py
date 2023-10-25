@@ -182,8 +182,10 @@ class CarParking(Env):
     # calculate reward
     reward -= 2
     euc_dis = np.linalg.norm(self.state['distances'])
+    velocity_factor = 0
     if euc_dis < 500:
-      reward += 500/(euc_dis+20*abs(self.state['velocity']))
+      velocity_factor = 20*abs(self.state['velocity'])
+    reward += 500/(euc_dis+velocity_factor)
 
 
     # check if done

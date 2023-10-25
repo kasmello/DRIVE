@@ -2,7 +2,6 @@ import numpy as np
 import time
 import random
 import os
-import pygame
 from datetime import datetime
 from agent import ActorCritic
 from environment import CarParking
@@ -25,13 +24,13 @@ gamma = 0.99
 hidden_sizes = (64, 64)
 lr_policy = 0.001
 lr_value = 0.005
-max_episodes = 1000
+max_episodes = 10000
 max_steps = 10000
 criterion_episodes = 5
 
 agent = ActorCritic(env, gamma=gamma, hidden_sizes=hidden_sizes, lr_policy=lr_policy, lr_value=lr_value)
 
-agent.train(max_episodes, 100)
+agent.train(max_episodes, 100, folder_path)
 
 state = env.reset()
 done = False

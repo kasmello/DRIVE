@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn
+import pygame
+import os
 import matplotlib.pyplot as plt
 from gym.spaces import Discrete, Box, Dict
 from tqdm import tqdm
@@ -136,7 +138,7 @@ class ActorCritic():
         self.policynet.update(state, action, delta)
         self.valuenet.update(state, target)
 
-    def train(self, max_episodes, criterion_episodes):
+    def train(self, max_episodes, criterion_episodes, folder_path):
         # train the agent for a number of episodes
         num_steps = 0
         episode_rewards = []
@@ -155,6 +157,9 @@ class ActorCritic():
 
                 # send the action to the environment
                 next_state, reward, terminated, _ = self.env.step(action)
+                frame = self.env.render()
+                frame_name = f'{episode}.png'
+                pygame.image.save(frame, os.path.join(folder_path, frame_name))
                 episode_rewards[-1] += reward
 
                 # convert next state to torch format
