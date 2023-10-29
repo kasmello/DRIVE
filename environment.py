@@ -10,7 +10,7 @@ from gym.spaces import Discrete, Box, Dict
 
 class CarParking(Env):
   
-  def __init__(self, fps):
+  def __init__(self, fps, step_limit):
     # 1=right, 2=left, 3=stay
     # 1=accelerate, 2=deccelerate, 3=same speed and direction
 
@@ -33,11 +33,12 @@ class CarParking(Env):
     self.max_steering=30
     self.max_velocity=30 #in m/s
     self.speed_limit=10
+    self.step_limit = step_limit
     self.max_acceleration=3.4 #around 12kmh/s
     self.natural_decceleration=1
     self.car_image = pygame.image.load('car_sprite.png')
     self.car_image = pygame.transform.scale(self.car_image, (self.car_width, self.car_length))
-    self.action_space=Box(low=np.array([1,1]),high=np.array([3,3]),dtype=int)
+    self.action_space=Discrete(9,start=0)
     # 'velocity','acceleration','angle','pos','steering','wheels_inside','distances'
     # self.observation_space=Dict({
     #     'velocity': Box(low=np.array([-self.max_velocity]),high=np.array([self.max_velocity]))
@@ -130,7 +131,9 @@ class CarParking(Env):
     reward = 0
     opposite = False
     terminated = False
+    truncated = False
     # timestep = self.clock.get_time() / 1000
+    print(action)
     action = np.array([int((action)/3)+1,((action)%3)+1]) 
 
     if action[0]==1:
@@ -206,7 +209,10 @@ class CarParking(Env):
     self.clock.tick(self.fps)
     self.last_reward = reward
     self.state = self.deconstruct_array(self.state_labelled)
-    return self.state, reward, terminated, info
+    self.current_step += 1
+    if self.current_step == self.step_limit:
+      truncated = True
+    return self.state, reward, terminated, truncated, info
   
   def render(self):
     if not self.screen:
@@ -239,6 +245,7 @@ class CarParking(Env):
     distance_text = font.render(f"distance: ({round(self.state_labelled['distances'][0],2)},{round(self.state_labelled['distances'][1],2)})", True, (255, 0, 0)) 
     reward_text = font.render(f"last reward: ({self.last_reward})", True, (255, 0, 0)) 
     pos_text = font.render(f"pos: {self.state_labelled['pos']}", True, (255, 0, 0)) 
+    step_text = font.render(f"step: {self.current_step}", True, (255, 0, 0)) 
     self.screen.blit(vel_text, (1000, 10))
     self.screen.blit(acc_text, (1000, 100))
     self.screen.blit(steer_text, (1000, 200))
@@ -246,6 +253,7 @@ class CarParking(Env):
     self.screen.blit(distance_text, (1000, 400))
     self.screen.blit(pos_text, (1000, 500))
     self.screen.blit(reward_text, (1000, 600))
+    self.screen.blit(step_text, (1000, 700))
 
     
     rotated = pygame.transform.rotate(self.car_image, -self.state_labelled['angle'])
@@ -262,6 +270,7 @@ class CarParking(Env):
   def set_vars(self):
     x_noise = random.uniform(-(self.road_width-self.car_width)/2,(self.road_width-self.car_width)/2)
     y_noise = random.uniform(0,50)
+    self.current_step = 0
     self.state_labelled = OrderedDict({
         'velocity': 0
         ,'acceleration': 0
@@ -289,6 +298,7 @@ class CarParking(Env):
     #get angle
     
     
+    
     self.normalisation_table = {
       'velocity': [self.max_velocity,self.max_velocity*2], #plus by min, divide by range
       'acceleration': [self.max_acceleration, self.max_acceleration*2],
@@ -300,6 +310,7 @@ class CarParking(Env):
       'distances_x': [0, self.area_length],
       'distances_y': [0, self.area_width]
     }
+    self.state = self.deconstruct_array(self.state_labelled)
 
   def calculate_distances(self): #return array of 2 (center of car - center of goal)
     distances = np.zeros(2)
@@ -316,7 +327,7 @@ class CarParking(Env):
   def reset(self, seed=None, options=None):
     super().reset(seed=seed)
     self.set_vars()
-    return self.state_labelled
+    return self.state, None
   
   def convert_actions(self, action):
     return action[1] + (action[0]*3)
@@ -338,30 +349,20 @@ class CarParking(Env):
 
 if __name__ == '__main__':
   fps = 60
-  env = CarParking(fps)
-  state = env.reset()
+  step_limit = 1_000
+  env = CarParking(fps, step_limit)
+  state, _ = env.reset()
   score = 0
   start = time.time()
-  # for i in range(10000):
-  #     action = env.action_space.sample()
-  #     action = np.array([3,1])
-  #     if i <1000:
-  #         action = np.array([3,1])
-  #     state, reward, done, info, coords = env.step(env.convert_actions(action))
-  #     env.render()
-  #     score += reward
-  #     if done:
-  #         env.close()
-  #         print('CAR CRASH')
-  #         break
   env.render()
-  done = False
+  terminated = False
+  truncated = False
   i = 0
-  while not done:
+  while not (terminated or truncated):
     i += 1
     for event in pygame.event.get():
       if event.type == pygame.QUIT:
-        done = True
+        truncated = True
         break
 
     driving = 2
@@ -379,16 +380,13 @@ if __name__ == '__main__':
       steering = 0
 
     action = np.array([steering,driving])
-    state, reward, done, info = env.step(env.convert_actions(action))
+    state, reward, terminated, truncated, info = env.step(env.convert_actions(action))
     env.render()
     score += reward
-    if done:
-      env.close()
-      break
     # time.sleep(1/fps)
     if i == 2000000:
       done = True
-
+  env.close()
   end = time.time()
   print(end-start)
 
