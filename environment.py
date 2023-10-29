@@ -47,6 +47,7 @@ class CarParking(Env):
         ,'steering': Discrete(61,start=-30)#angle of steering wheel
         ,'wheels_inside': Discrete(5,start=0)
         ,'distances': Box(low=np.array([0,0]),high=np.array([self.parking_length, self.parking_width]))
+        # put in angular velocity
         })
     self.set_vars()
 
@@ -91,7 +92,7 @@ class CarParking(Env):
       if abs(self.state['velocity']) > self.speed_limit:
         reward -= 1
       self.state['velocity'] = max(-self.max_velocity, min(self.state['velocity'], self.max_velocity))
-      if abs(self.state['velocity'])<0.001:
+      if abs(self.state['velocity'])<0.01:
         self.state['velocity']=0
 
       if self.state['steering']:
@@ -127,7 +128,7 @@ class CarParking(Env):
     opposite = False
     terminated = False
     # timestep = self.clock.get_time() / 1000
-    action = np.array([int((action-1)/3)+1,((action-1)%3)+1]) 
+    action = np.array([int((action)/3)+1,((action)%3)+1]) 
 
     if action[0]==1:
       self.state['steering']+=self.max_steering*(self.timestep/6) 
@@ -182,10 +183,12 @@ class CarParking(Env):
     # calculate reward
     reward -= 2
     euc_dis = np.linalg.norm(self.state['distances'])
-    velocity_factor = 0
-    if euc_dis < 500:
-      velocity_factor = 20*abs(self.state['velocity'])
-    reward += 500/(euc_dis+velocity_factor)
+    if euc_dis < 500 and abs(self.state['velocity'])>0:
+      velocity_factor = 100*abs(self.state['velocity'])
+      reward += 800/(euc_dis+velocity_factor)
+    else:
+      
+      reward += 500/(euc_dis)
 
 
     # check if done
@@ -229,7 +232,7 @@ class CarParking(Env):
     acc_text = font.render(f"acceleration: {self.state['acceleration']}", True, (255, 0, 0)) 
     steer_text = font.render(f"Steering angle: {self.state['steering']}", True, (255, 0, 0)) 
     wheels_text = font.render(f"wheels inside: {self.state['wheels_inside']}", True, (255, 0, 0)) 
-    distance_text = font.render(f"distance: ({self.state['distances'][0]},{self.state['distances'][1]})", True, (255, 0, 0)) 
+    distance_text = font.render(f"distance: ({round(self.state['distances'][0],2)},{round(self.state['distances'][1],2)})", True, (255, 0, 0)) 
     reward_text = font.render(f"last reward: ({self.last_reward})", True, (255, 0, 0)) 
     pos_text = font.render(f"pos: {self.state['pos']}", True, (255, 0, 0)) 
     self.screen.blit(vel_text, (1000, 10))
@@ -311,7 +314,7 @@ class CarParking(Env):
     return self.state
   
   def convert_actions(self, action):
-    return action[1] + ((action[0]-1)*3)
+    return action[1] + (action[0]*3)
   
   def deconstruct_array(self,arr):
     llist = []
@@ -359,19 +362,19 @@ if __name__ == '__main__':
         done = True
         break
 
-    driving = 3
-    steering = 3
+    driving = 2
+    steering = 2
     keys = pygame.key.get_pressed()
     if keys[pygame.K_w]:
-      driving = 1
+      driving = 0
     elif keys[pygame.K_s]:
-      driving = 2
+      driving = 1
 
 
     if keys[pygame.K_a]:
-      steering = 2
-    elif keys[pygame.K_d]:
       steering = 1
+    elif keys[pygame.K_d]:
+      steering = 0
 
     action = np.array([steering,driving])
     state, reward, done, info = env.step(env.convert_actions(action))
