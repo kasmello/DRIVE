@@ -39,19 +39,10 @@ class CarParking(Env):
     self.car_image = pygame.image.load('car_sprite.png')
     self.car_image = pygame.transform.scale(self.car_image, (self.car_width, self.car_length))
     self.action_space=Discrete(9,start=0)
-    # 'velocity','acceleration','angle','pos','steering','wheels_inside','distances'
-    # self.observation_space=Dict({
-    #     'velocity': Box(low=np.array([-self.max_velocity]),high=np.array([self.max_velocity]))
-    #     ,'acceleration': Box(low=np.array([-self.max_acceleration]),high=np.array([self.max_acceleration]))
-    #     ,'angle': Box(low=np.array([0]),high=np.array([359])) #angle of car
-    #     ,'pos': Box(low=np.array([0, 0]), high=np.array([self.area_length-1, self.area_width-1])) #calculate 4 corners of car using trigonometry
-    #     ,'steering': Discrete(61,start=-30)#angle of steering wheel
-    #     ,'wheels_inside': Discrete(5,start=0)
-    #     ,'distances': Box(low=np.array([0,0]),high=np.array([self.parking_length, self.parking_width]))
-    #     })
     self.observation_space=Box(
-      low = np.array([0,0,0,0,0,0,0,0,0]),
-      high = np.array([1,1,1,1,1,1,1,1,1])
+      low = np.array([0,0,0,0,0,0,0,0,0])
+      ,high = np.array([1,1,1,1,1,1,1,1,1])
+      ,dtype=np.int32
     )
     self.set_vars()
 
@@ -133,7 +124,6 @@ class CarParking(Env):
     terminated = False
     truncated = False
     # timestep = self.clock.get_time() / 1000
-    print(action)
     action = np.array([int((action)/3)+1,((action)%3)+1]) 
 
     if action[0]==1:
@@ -246,6 +236,7 @@ class CarParking(Env):
     reward_text = font.render(f"last reward: ({self.last_reward})", True, (255, 0, 0)) 
     pos_text = font.render(f"pos: {self.state_labelled['pos']}", True, (255, 0, 0)) 
     step_text = font.render(f"step: {self.current_step}", True, (255, 0, 0)) 
+    state_text = font.render(f"whole state: {self.state}", True, (255, 0, 0)) 
     self.screen.blit(vel_text, (1000, 10))
     self.screen.blit(acc_text, (1000, 100))
     self.screen.blit(steer_text, (1000, 200))
@@ -254,6 +245,7 @@ class CarParking(Env):
     self.screen.blit(pos_text, (1000, 500))
     self.screen.blit(reward_text, (1000, 600))
     self.screen.blit(step_text, (1000, 700))
+    self.screen.blit(state_text, (0, 800))
 
     
     rotated = pygame.transform.rotate(self.car_image, -self.state_labelled['angle'])
@@ -349,7 +341,7 @@ class CarParking(Env):
 
 if __name__ == '__main__':
   fps = 60
-  step_limit = 1_000
+  step_limit = 100_000
   env = CarParking(fps, step_limit)
   state, _ = env.reset()
   score = 0
