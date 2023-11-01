@@ -29,7 +29,6 @@ class CarParking(Env):
     self.area_width = (2 * self.road_width) + (2 * self.parking_length) #1300
     self.area_length = 8 * self.parking_width #1920
     self.parking_hypotenuse = np.linalg.norm([self.area_width,self.area_length])
-
     self.max_steering=30
     self.max_velocity=30 #in m/s
     self.speed_limit=10
@@ -40,8 +39,8 @@ class CarParking(Env):
     self.car_image = pygame.transform.scale(self.car_image, (self.car_width, self.car_length))
     self.action_space=Discrete(9,start=0)
     self.observation_space=Box(
-      low = np.array([0,0,0,0,0,0,0,0,0])
-      ,high = np.array([1,1,1,1,1,1,1,1,1])
+      low = np.array([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0])
+      ,high = np.array([1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1])
       ,dtype=np.int32
     )
     self.set_vars()
@@ -99,6 +98,7 @@ class CarParking(Env):
       if self.state_labelled['angle'] < 0:
         self.state_labelled['angle']+= 360
       self.state_labelled['pos'] += np.array([self.state_labelled['velocity'] * math.sin(math.radians(self.state_labelled['angle']))*self.timestep,-self.state_labelled['velocity'] * math.cos(math.radians(self.state_labelled['angle']))*self.timestep])
+      self.state_labelled['angular_velocity'] = angular_velocity
       return reward
       
       
@@ -112,9 +112,18 @@ class CarParking(Env):
                                                   self.car_hypotenuse*math.sin(math.radians(self.state_labelled['angle'])+2*math.pi-self.hypotenuse_angle)])
     lf = self.state_labelled['pos'] + np.array([self.car_hypotenuse*math.cos(math.radians(self.state_labelled['angle'])+math.pi+self.hypotenuse_angle),
                                                   self.car_hypotenuse*math.sin(math.radians(self.state_labelled['angle'])+math.pi+self.hypotenuse_angle)])
-
     return rf, lf, rb, lb
   
+  def calculate_wheels_to_t(self):
+    distances = []
+    for wheel in ['rf','lf','rb','lb']:
+      dist_1 = self.goal[2]-self.wheels[wheel]
+      dist_2 = self.goal[3]-self.wheels[wheel]
+      distances.extend(dist_1.tolist())
+      distances.extend(dist_2.tolist())
+    return distances
+                  
+
 
   def step(self, action):
     if not self.clock:
@@ -171,20 +180,25 @@ class CarParking(Env):
       else:
         self.state_labelled['acceleration']=0
     
+    #punish static steering
+    if abs(self.state_labelled['velocity'])==0 and action[0]!=0 and action[1]==0:
+      reward -= 10
+
     if not opposite:
       self.state_labelled['acceleration'] = max(-self.max_acceleration, min(self.state_labelled['acceleration'], self.max_acceleration))
     reward = self.process_new_position(reward)
     self.wheels['rf'], self.wheels['lf'], self.wheels['rb'], self.wheels['lb'] = self.calculate_four_corners()
+    self.state_labelled['distances_wheels'] = self.calculate_wheels_to_t()
     self.state_labelled['distances'] = self.calculate_distances()
     # calculate reward
     reward -= 2
     euc_dis = np.linalg.norm(self.state_labelled['distances'])
-    if euc_dis < 500 and abs(self.state_labelled['velocity'])>0:
+    if euc_dis < 700 and abs(self.state_labelled['velocity'])>0:
       velocity_factor = 100*abs(self.state_labelled['velocity'])
-      reward += 800/(euc_dis+velocity_factor)
+      reward += 2000/(euc_dis+velocity_factor)
     else:
       
-      reward += 500/(euc_dis)
+      reward += 1000/(euc_dis)
 
 
     # check if done
@@ -235,7 +249,9 @@ class CarParking(Env):
     distance_text = font.render(f"distance: ({round(self.state_labelled['distances'][0],2)},{round(self.state_labelled['distances'][1],2)})", True, (255, 0, 0)) 
     reward_text = font.render(f"last reward: ({self.last_reward})", True, (255, 0, 0)) 
     pos_text = font.render(f"pos: {self.state_labelled['pos']}", True, (255, 0, 0)) 
+    ang_vel_text = font.render(f"angular velocity: {self.state_labelled['angular_velocity']}", True, (255,0,0))
     step_text = font.render(f"step: {self.current_step}", True, (255, 0, 0)) 
+    distance_wheels_text = font.render(f"wheels: {self.state_labelled['distances_wheels']}", True, (255, 0, 0)) 
     state_text = font.render(f"whole state: {self.state}", True, (255, 0, 0)) 
     self.screen.blit(vel_text, (1000, 10))
     self.screen.blit(acc_text, (1000, 100))
@@ -243,9 +259,11 @@ class CarParking(Env):
     self.screen.blit(wheels_text, (1000, 300))
     self.screen.blit(distance_text, (1000, 400))
     self.screen.blit(pos_text, (1000, 500))
-    self.screen.blit(reward_text, (1000, 600))
-    self.screen.blit(step_text, (1000, 700))
-    self.screen.blit(state_text, (0, 800))
+    self.screen.blit(ang_vel_text, (1000, 600))
+    self.screen.blit(reward_text, (1000, 700))
+    self.screen.blit(step_text, (1000, 800))
+    self.screen.blit(distance_wheels_text, (10, 900))
+    self.screen.blit(state_text, (10, 1000))
 
     
     rotated = pygame.transform.rotate(self.car_image, -self.state_labelled['angle'])
@@ -265,12 +283,13 @@ class CarParking(Env):
     self.current_step = 0
     self.state_labelled = OrderedDict({
         'velocity': 0
+        ,'angular_velocity': 0
         ,'acceleration': 0
         ,'angle': 90
         ,'pos': np.array([(self.car_length/2),self.parking_length+(self.road_width/2)-1])
         ,'steering': 0
         ,'wheels_inside': 0}) 
-    self.goal_number = random.randint(0,15)
+    self.goal_number = random.randint(12,15) #now only bottom right
     self.wheels = {}
     self.wheels['rf'], self.wheels['lf'], self.wheels['rb'], self.wheels['lb'] = self.calculate_four_corners()
     if self.goal_number < 8:
@@ -284,6 +303,7 @@ class CarParking(Env):
                             [((self.goal_number-8)*self.parking_width),self.parking_length+(2*self.road_width)], #inside left
                             [((self.goal_number-7)*self.parking_width)-1,self.parking_length+(2*self.road_width)]]) #inside right
     # get distance of all wheels to the two outside parking lines
+    self.state_labelled['distances_wheels'] = self.calculate_wheels_to_t()
     self.goal_center = np.array(np.mean(self.goal, axis=0))
     self.state_labelled['distances'] = self.calculate_distances()
     self.last_reward = 0
@@ -293,14 +313,15 @@ class CarParking(Env):
     
     self.normalisation_table = {
       'velocity': [self.max_velocity,self.max_velocity*2], #plus by min, divide by range
+      'angular_velocity': [0.06,0.12],
       'acceleration': [self.max_acceleration, self.max_acceleration*2],
       'angle': [0, 360],
       'pos_x': [0, self.area_length],
       'pos_y': [0, self.area_width],
       'steering': [self.max_steering, self.max_steering * 2],
       'wheels_inside': [0, 4],
-      'distances_x': [0, self.area_length],
-      'distances_y': [0, self.area_width]
+      'distances_x': [self.area_length, self.area_length*2],
+      'distances_y': [self.area_width, self.area_width*2]
     }
     self.state = self.deconstruct_array(self.state_labelled)
 
@@ -326,12 +347,21 @@ class CarParking(Env):
   
   def deconstruct_array(self,arr):
     llist = []
-    for key in ['velocity','acceleration','angle','pos','steering','wheels_inside','distances']:
+    #'velocity','acceleraton','angle','pos','steering','wheels_inside','distances', 'distances_wheels'
+    for key in ['velocity','acceleration','angle','pos','steering','wheels_inside','distances', 'angular_velocity','distances_wheels']:
       if key in ['pos', 'distances']:
         new_arr = arr[key].flatten()
         new_arr[0] = (new_arr[0]+self.normalisation_table[f'{key}_x'][0])/self.normalisation_table[f'{key}_x'][1]
         new_arr[1] = (new_arr[1]+self.normalisation_table[f'{key}_y'][0])/self.normalisation_table[f'{key}_y'][1]
         llist.extend(new_arr.tolist())
+      elif key == 'distances_wheels':
+        for i, item in enumerate(arr[key]):
+          if i % 2 == 0:
+            llist.append((item+self.normalisation_table['distances_x'][0])/self.normalisation_table['distances_x'][1])
+          else:
+            llist.append((item+self.normalisation_table['distances_y'][0])/self.normalisation_table['distances_y'][1])
+
+
       else:
         llist.append((arr[key]+self.normalisation_table[key][0])/self.normalisation_table[key][1])
         

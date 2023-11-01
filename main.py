@@ -20,6 +20,7 @@ print(f"Created folder: {folder_path}")
 
 env = CarParking(60)
 
+
 gamma = 0.99
 hidden_sizes = (64, 64)
 lr_policy = 0.001
