@@ -47,6 +47,7 @@ class CarParking(Env):
 
 
   def check_if_inside(self):
+    
     goal = True
     wheels_inside = 0
     reward = 0
@@ -68,6 +69,7 @@ class CarParking(Env):
 
     if self.state_labelled['velocity'] != 0:
       goal = False
+
 
     self.state_labelled['wheels_inside'] = wheels_inside
     if goal:
@@ -192,20 +194,19 @@ class CarParking(Env):
     self.state_labelled['distances'] = self.calculate_distances()
     # calculate reward
     reward -= 2
-    euc_dis = np.linalg.norm(self.state_labelled['distances'])
-    if euc_dis < 700 and abs(self.state_labelled['velocity'])>0:
-      velocity_factor = 100*abs(self.state_labelled['velocity'])
-      reward += 2000/(euc_dis+velocity_factor)
-    else:
-      
-      reward += 1000/(euc_dis)
-
-
+    
     # check if done
     terminated, reward_gain = self.check_if_inside()
-    if terminated and abs(reward_gain) > 1000:
+    if terminated:
       reward = reward_gain
     else:
+      euc_dis = np.linalg.norm(self.state_labelled['distances'])
+      if euc_dis < 700 and abs(self.state_labelled['velocity'])>0:
+        velocity_factor = 100*abs(self.state_labelled['velocity'])
+        reward += 2000/(euc_dis+velocity_factor)
+      else:
+        
+        reward += 1000/(euc_dis)
       reward += reward_gain
 
     
@@ -347,7 +348,7 @@ class CarParking(Env):
   
   def deconstruct_array(self,arr):
     llist = []
-    #'velocity','acceleraton','angle','pos','steering','wheels_inside','distances', 'distances_wheels'
+    #'velocity','acceleraton','angle','pos','steering','wheels_inside','distances', 'angular velocity' 'distances_wheels'
     for key in ['velocity','acceleration','angle','pos','steering','wheels_inside','distances', 'angular_velocity','distances_wheels']:
       if key in ['pos', 'distances']:
         new_arr = arr[key].flatten()
