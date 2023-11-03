@@ -1,21 +1,25 @@
+# import models
 
 import pygame
 import numpy as np
 import math
 import random
 import time
-from gym import Env
+import gymnasium
+import sys
+sys.modules["gym"] = gymnasium
 from collections import OrderedDict
-from gym.spaces import Discrete, Box, Dict
 
-class CarParking(Env):
+
+class CarParking(gymnasium.Env):
   
   def __init__(self, fps, step_limit):
-    # 1=right, 2=left, 3=stay
-    # 1=accelerate, 2=deccelerate, 3=same speed and direction
 
+#pygame parameters
     self.screen = None #pygame.display.set_mode((area_length, area_width))
     self.clock = None #pygame.time.Clock()
+
+#environment constraints
     self.car_width = 150
     self.car_length = 400
     self.fps = fps
@@ -37,56 +41,66 @@ class CarParking(Env):
     self.natural_decceleration=1
     self.car_image = pygame.image.load('car_sprite.png')
     self.car_image = pygame.transform.scale(self.car_image, (self.car_width, self.car_length))
-    self.action_space=Discrete(9,start=0)
-    self.observation_space=Box(
-      low = np.array([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0])
-      ,high = np.array([1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1])
+    self.action_space=gymnasium.spaces.discrete.Discrete(9)
+    self.observation_space=gymnasium.spaces.box.Box(
+      low = np.array([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0])
+      ,high = np.array([1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1])
       ,dtype=np.int32
     )
     self.set_vars()
 
 
+  # checks if wheels are inside of the parking lot
   def check_if_inside(self):
     
     goal = True
     wheels_inside = 0
     reward = 0
+
+    # for loop to check if individual wheels are inside the coordinates of the parking lot
     for wheel in ['lb','rb','lf','rf']:
       if self.wheels[wheel][0] < 0 or self.wheels[wheel][0] >= self.area_length or self.wheels[wheel][1] < 0 or self.wheels[wheel][1] >= self.area_width:
         return True,-10000
+      
       if self.goal_number<8:
         if self.wheels[wheel][0] < self.goal[0][0] or self.wheels[wheel][0] > self.goal[1][0] or self.wheels[wheel][1] < self.goal[0][1] or self.wheels[wheel][1] > self.goal[2][1]:
           goal = False
         else:
           wheels_inside += 1
-          reward += 5
+
       else:
         if self.wheels[wheel][0] < self.goal[0][0] or self.wheels[wheel][0] > self.goal[1][0] or self.wheels[wheel][1] > self.goal[0][1] or self.wheels[wheel][1] < self.goal[2][1]:
           goal = False
         else:
           wheels_inside += 1
-          reward += 5
 
+# if velocity is 0 and all wheels are inside parking lot, goal is reached
     if self.state_labelled['velocity'] != 0:
       goal = False
-
+    
+    self.state_labelled['wheel_difference'] = wheels_inside - self.state_labelled['wheels_inside']
+    
 
     self.state_labelled['wheels_inside'] = wheels_inside
     if goal:
       return True, 10000
+    reward += self.state_labelled['wheel_difference'] * 500
     return False, reward
 
+# function to close the pygame
   def close(self):
     if self.screen:
-
       pygame.quit()
       self.screen=None
       self.clock=None
 
+# process new position after velocity and acceleration are calculated
   def process_new_position(self, reward):
       self.state_labelled['velocity'] += self.state_labelled['acceleration'] /10
       if abs(self.state_labelled['velocity']) > self.speed_limit:
-        reward -= 1
+        reward -= 10
+        # penalty if car goes over speed limit of 10m/s
+
       self.state_labelled['velocity'] = max(-self.max_velocity, min(self.state_labelled['velocity'], self.max_velocity))
       if abs(self.state_labelled['velocity'])<0.01:
         self.state_labelled['velocity']=0
@@ -104,7 +118,7 @@ class CarParking(Env):
       return reward
       
       
-
+# calculate x and y coordinates of 4 wheels baesd on center of car
   def calculate_four_corners(self):
     rb = self.state_labelled['pos'] + np.array([self.car_hypotenuse*math.cos(math.radians(self.state_labelled['angle'])+self.hypotenuse_angle),
                                                   self.car_hypotenuse*math.sin(math.radians(self.state_labelled['angle'])+self.hypotenuse_angle)])
@@ -115,7 +129,8 @@ class CarParking(Env):
     lf = self.state_labelled['pos'] + np.array([self.car_hypotenuse*math.cos(math.radians(self.state_labelled['angle'])+math.pi+self.hypotenuse_angle),
                                                   self.car_hypotenuse*math.sin(math.radians(self.state_labelled['angle'])+math.pi+self.hypotenuse_angle)])
     return rf, lf, rb, lb
-  
+
+# calculates vertical and horizontal distances to the opening of parking lot
   def calculate_wheels_to_t(self):
     distances = []
     for wheel in ['rf','lf','rb','lb']:
@@ -124,9 +139,8 @@ class CarParking(Env):
       distances.extend(dist_1.tolist())
       distances.extend(dist_2.tolist())
     return distances
-                  
 
-
+# step function
   def step(self, action):
     if not self.clock:
       self.clock = pygame.time.Clock()
@@ -135,6 +149,15 @@ class CarParking(Env):
     terminated = False
     truncated = False
     # timestep = self.clock.get_time() / 1000
+
+    # the code below transforms a discrete action into a tuple, with the first number relating to steering and the second to driving
+    # steering = 0 => gradually resets the steering wheel to neutral
+    # steering = 1 => to the right
+    # steering = 2 => to the left
+
+    # driving = 0 => gradually loses monentum and comes to halt
+    # driving = 1 => accelerate
+    # driving = 2 => decelerate
     action = np.array([int((action)/3)+1,((action)%3)+1]) 
 
     if action[0]==1:
@@ -191,22 +214,23 @@ class CarParking(Env):
     reward = self.process_new_position(reward)
     self.wheels['rf'], self.wheels['lf'], self.wheels['rb'], self.wheels['lb'] = self.calculate_four_corners()
     self.state_labelled['distances_wheels'] = self.calculate_wheels_to_t()
-    self.state_labelled['distances'] = self.calculate_distances()
-    # calculate reward
-    reward -= 2
+    distances = self.calculate_distances()
+    self.state_labelled['distance_difference'] = np.linalg.norm(distances) - np.linalg.norm(self.state_labelled['distances'])
+    self.state_labelled['distances'] = distances
+    #reward for getting closer
+    reward += -self.state_labelled['distance_difference']/20
+    
+    # penalise for every timestep
+    reward -= 1
     
     # check if done
     terminated, reward_gain = self.check_if_inside()
     if terminated:
       reward = reward_gain
     else:
-      euc_dis = np.linalg.norm(self.state_labelled['distances'])
-      if euc_dis < 700 and abs(self.state_labelled['velocity'])>0:
-        velocity_factor = 100*abs(self.state_labelled['velocity'])
-        reward += 2000/(euc_dis+velocity_factor)
-      else:
-        
-        reward += 1000/(euc_dis)
+      if self.state_labelled['wheels_inside']>0:
+        reward_gain = reward_gain / max(abs(self.state_labelled['velocity']),0.3)
+
       reward += reward_gain
 
     
@@ -253,6 +277,8 @@ class CarParking(Env):
     ang_vel_text = font.render(f"angular velocity: {self.state_labelled['angular_velocity']}", True, (255,0,0))
     step_text = font.render(f"step: {self.current_step}", True, (255, 0, 0)) 
     distance_wheels_text = font.render(f"wheels: {self.state_labelled['distances_wheels']}", True, (255, 0, 0)) 
+    wheel_difference_text = font.render(f"wheel_difference: {self.state_labelled['wheel_difference']}", True, (255, 0, 0)) 
+    distance_difference_text = font.render(f"distance_difference: {self.state_labelled['distance_difference']}", True, (255, 0, 0)) 
     state_text = font.render(f"whole state: {self.state}", True, (255, 0, 0)) 
     self.screen.blit(vel_text, (1000, 10))
     self.screen.blit(acc_text, (1000, 100))
@@ -263,8 +289,9 @@ class CarParking(Env):
     self.screen.blit(ang_vel_text, (1000, 600))
     self.screen.blit(reward_text, (1000, 700))
     self.screen.blit(step_text, (1000, 800))
-    self.screen.blit(distance_wheels_text, (10, 900))
-    self.screen.blit(state_text, (10, 1000))
+    # self.screen.blit(distance_wheels_text, (1000, 900))
+    self.screen.blit(distance_difference_text, (1000, 900))
+    self.screen.blit(wheel_difference_text, (1000, 1000))
 
     
     rotated = pygame.transform.rotate(self.car_image, -self.state_labelled['angle'])
@@ -289,7 +316,9 @@ class CarParking(Env):
         ,'angle': 90
         ,'pos': np.array([(self.car_length/2),self.parking_length+(self.road_width/2)-1])
         ,'steering': 0
-        ,'wheels_inside': 0}) 
+        ,'wheels_inside': 0
+        ,'wheel_difference': 0
+        ,'distance_difference': 0}) 
     self.goal_number = random.randint(12,15) #now only bottom right
     self.wheels = {}
     self.wheels['rf'], self.wheels['lf'], self.wheels['rb'], self.wheels['lb'] = self.calculate_four_corners()
@@ -321,6 +350,7 @@ class CarParking(Env):
       'pos_y': [0, self.area_width],
       'steering': [self.max_steering, self.max_steering * 2],
       'wheels_inside': [0, 4],
+      'wheel_difference': [2, 2],
       'distances_x': [self.area_length, self.area_length*2],
       'distances_y': [self.area_width, self.area_width*2]
     }
@@ -348,8 +378,8 @@ class CarParking(Env):
   
   def deconstruct_array(self,arr):
     llist = []
-    #'velocity','acceleraton','angle','pos','steering','wheels_inside','distances', 'angular velocity' 'distances_wheels'
-    for key in ['velocity','acceleration','angle','pos','steering','wheels_inside','distances', 'angular_velocity','distances_wheels']:
+    #'velocity','acceleration','angle','pos','steering','wheels_inside', 'wheel_difference','distances', 'distance_difference','angular_velocity',s 'distances_wheels'
+    for key in ['velocity','acceleration','angle','pos','steering','wheels_inside', 'wheel_difference','distances', 'distance_difference','angular_velocity', 'distances_wheels']:
       if key in ['pos', 'distances']:
         new_arr = arr[key].flatten()
         new_arr[0] = (new_arr[0]+self.normalisation_table[f'{key}_x'][0])/self.normalisation_table[f'{key}_x'][1]
@@ -362,7 +392,8 @@ class CarParking(Env):
           else:
             llist.append((item+self.normalisation_table['distances_y'][0])/self.normalisation_table['distances_y'][1])
 
-
+      elif key == 'distance_difference':
+        llist.append((arr[key]+self.normalisation_table['velocity'][0])/self.normalisation_table['velocity'][1])
       else:
         llist.append((arr[key]+self.normalisation_table[key][0])/self.normalisation_table[key][1])
         
